@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 
+import { connectDB } from "./config/db.js";
 import healthRoutes from "./routes/health.routes.js";
 
 dotenv.config();
@@ -29,10 +30,10 @@ app.get("/", (req, res) => {
   });
 });
 
-// Health check route
+// Health check
 app.use("/api/health", healthRoutes);
 
-// Handle unknown routes
+// 404 handler
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -40,8 +41,19 @@ app.use((req, res) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🍕 PizzaHub server running on port ${PORT}`);
-  console.log(`🌐 http://localhost:${PORT}`);
-});
+// Start server after DB connection
+async function startServer() {
+  try {
+    await connectDB();
+
+    app.listen(PORT, () => {
+      console.log(`🍕 PizzaHub server running on port ${PORT}`);
+      console.log(`🌐 http://localhost:${PORT}`);
+    });
+  } catch (error) {
+    console.error("Server startup failed:", error.message);
+    process.exit(1);
+  }
+}
+
+startServer();
