@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 
 import { connectDB } from "./config/db.js";
 import healthRoutes from "./routes/health.routes.js";
+import menuRoutes from "./routes/menu.routes.js";
 
 dotenv.config();
 
@@ -32,6 +33,8 @@ app.get("/", (req, res) => {
 
 // Health check
 app.use("/api/health", healthRoutes);
+
+app.use("/api/menu", menuRoutes);
 
 // 404 handler
 app.use((req, res) => {
