@@ -1,4 +1,6 @@
+
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 
 const JWKS = createRemoteJWKSet(
@@ -12,27 +14,50 @@ const authenticate = async (req, res, next) => {
     if (!authHeader?.startsWith("Bearer ")) {
       return res.status(401).json({
         success: false,
-        message: "Authentication required",
+        message: "Authentication token missing",
       });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.slice(7);
 
-    const { payload } = await jwtVerify(token, JWKS, {
-      issuer: process.env.AUTH_ISSUER,
-      audience: process.env.AUTH_AUDIENCE,
-    });
+    const verifyOptions = {};
+
+    if (process.env.AUTH_ISSUER) {
+      verifyOptions.issuer = process.env.AUTH_ISSUER;
+    }
+
+    if (process.env.AUTH_AUDIENCE) {
+      verifyOptions.audience = process.env.AUTH_AUDIENCE;
+    }
+
+    const { payload } = await jwtVerify(
+      token,
+      JWKS,
+      verifyOptions
+    );
 
     if (!payload.sub) {
       return res.status(401).json({
         success: false,
-        message: "Invalid token",
+        message: "Token subject missing",
       });
     }
 
-    const user = await getDB()
-      .collection("user")
-      .findOne({ id: payload.sub });
+    const db = getDB();
+
+    const userId = payload.sub;
+
+    const possibleIds = [{ id: userId }, { _id: userId }];
+
+    if (ObjectId.isValid(userId)) {
+      possibleIds.push({
+        _id: new ObjectId(userId),
+      });
+    }
+
+    const user = await db.collection("user").findOne({
+      $or: possibleIds,
+    });
 
     if (!user) {
       return res.status(401).json({
@@ -49,17 +74,21 @@ const authenticate = async (req, res, next) => {
     }
 
     req.user = {
-      id: payload.sub,
-      email: payload.email,
+      id: user.id || user._id?.toString() || userId,
+      email: user.email || payload.email || "",
+      name: user.name || "",
+      role: user.role || "customer",
     };
 
     next();
   } catch (error) {
+    console.error("Authentication error:", error.message);
+
     return res.status(401).json({
       success: false,
       message: "Invalid or expired token",
     });
   }
-}
+};
 
 export default authenticate;

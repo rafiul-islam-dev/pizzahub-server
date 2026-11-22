@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 
 export default function authorizeRoles(...allowedRoles) {
@@ -11,9 +12,21 @@ export default function authorizeRoles(...allowedRoles) {
       }
 
       const db = getDB();
+      const userId = req.user.id;
+
+      const possibleIds = [
+        { id: userId },
+        { _id: userId },
+      ];
+
+      if (ObjectId.isValid(userId)) {
+        possibleIds.push({
+          _id: new ObjectId(userId),
+        });
+      }
 
       const user = await db.collection("user").findOne({
-        id: req.user.id,
+        $or: possibleIds,
       });
 
       if (!user) {
@@ -26,14 +39,14 @@ export default function authorizeRoles(...allowedRoles) {
       if (user.banned) {
         return res.status(403).json({
           success: false,
-          message: "Your account is blocked",
+          message: "Your account has been blocked",
         });
       }
 
       if (!allowedRoles.includes(user.role)) {
         return res.status(403).json({
           success: false,
-          message: "You don't have permission",
+          message: "You do not have permission",
         });
       }
 
@@ -43,11 +56,11 @@ export default function authorizeRoles(...allowedRoles) {
 
       next();
     } catch (error) {
-      console.error("Role middleware error:", error);
+      console.error("Role authorization error:", error);
 
       return res.status(500).json({
         success: false,
-        message: "Authorization failed",
+        message: "Role authorization failed",
       });
     }
   };
