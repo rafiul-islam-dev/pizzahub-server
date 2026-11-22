@@ -1,6 +1,6 @@
 import { getDB } from "../config/db.js";
 
-export function authorizeRoles(...allowedRoles) {
+export default function authorizeRoles(...allowedRoles) {
   return async (req, res, next) => {
     try {
       if (!req.user?.id) {

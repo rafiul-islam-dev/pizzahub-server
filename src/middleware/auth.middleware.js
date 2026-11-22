@@ -4,7 +4,7 @@ const JWKS = createRemoteJWKSet(
   new URL(process.env.AUTH_JWKS_URL)
 );
 
-export async function authenticate(req, res, next) {
+const authenticate = async (req, res, next) => {
   try {
     const authHeader = req.headers.authorization;
 
@@ -41,3 +41,5 @@ export async function authenticate(req, res, next) {
     });
   }
 }
+
+export default authenticate;

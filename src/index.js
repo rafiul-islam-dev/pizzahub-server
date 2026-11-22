@@ -5,6 +5,9 @@ import dotenv from "dotenv";
 import { connectDB } from "./config/db.js";
 import healthRoutes from "./routes/health.routes.js";
 import menuRoutes from "./routes/menu.routes.js";
+import vendorRoutes from "./routes/vendor.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+import vendorMenuRoutes from "./routes/vendor-menu.routes.js";
 
 dotenv.config();
 
@@ -23,6 +26,7 @@ app.use(
 
 app.use(express.json());
 
+
 // Root route
 app.get("/", (req, res) => {
   res.status(200).json({
@@ -33,8 +37,10 @@ app.get("/", (req, res) => {
 
 // Health check
 app.use("/api/health", healthRoutes);
-
 app.use("/api/menu", menuRoutes);
+app.use("/api/vendor", vendorRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/vendor/menu", vendorMenuRoutes);
 
 // 404 handler
 app.use((req, res) => {
