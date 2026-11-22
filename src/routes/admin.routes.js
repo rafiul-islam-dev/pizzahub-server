@@ -4,7 +4,6 @@ import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 import authenticate from "../middleware/auth.middleware.js";
 import authorizeRoles from "../middleware/role.middleware.js";
-import { ObjectId } from "mongodb";
 
 const router = express.Router();
 
@@ -376,5 +375,187 @@ router.patch(
   }
 );
 
+// GET all orders
+router.get(
+  "/orders",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const page = Math.max(1, Number(req.query.page) || 1);
+      const limit = Math.min(
+        50,
+        Math.max(1, Number(req.query.limit) || 10)
+      );
+
+      const status = req.query.status || "";
+      const search = (req.query.search || "").trim();
+
+      const filter = {};
+
+      const allowedStatuses = [
+        "pending",
+        "confirmed",
+        "preparing",
+        "ready",
+        "delivered",
+        "cancelled",
+        "rejected",
+      ];
+
+      if (status && allowedStatuses.includes(status)) {
+        filter.status = status;
+      }
+
+      if (search) {
+        filter.$or = [
+          { orderNumber: { $regex: search, $options: "i" } },
+          { customerName: { $regex: search, $options: "i" } },
+          { customerEmail: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      const ordersCollection = db.collection("orders");
+
+      const total = await ordersCollection.countDocuments(filter);
+
+      const orders = await ordersCollection
+        .find(filter)
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .toArray();
+
+      return res.status(200).json({
+        success: true,
+        data: orders,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      });
+    } catch (error) {
+      console.error("Admin orders fetch error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch orders",
+      });
+    }
+  }
+);
+
+// Update order status by admin
+router.patch(
+  "/orders/:id/status",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { status } = req.body;
+
+      const allowedStatuses = [
+        "pending",
+        "confirmed",
+        "preparing",
+        "ready",
+        "delivered",
+        "cancelled",
+        "rejected",
+      ];
+
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order status",
+        });
+      }
+
+      const db = getDB();
+
+      const order = await db.collection("orders").findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      await db.collection("orders").updateOne(
+        { _id: new ObjectId(id) },
+        {
+          $set: {
+            status,
+            updatedAt: new Date(),
+            adminUpdatedBy: req.user.id,
+          },
+        }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Order status updated successfully",
+      });
+    } catch (error) {
+      console.error("Admin order status update error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update order status",
+      });
+    }
+  }
+);
+// GET single order details
+router.get(
+  "/orders/:id",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      const db = getDB();
+
+      const order = await db.collection("orders").findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        data: order,
+      });
+    } catch (error) {
+      console.error("Order details error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch order details",
+      });
+    }
+  }
+);
 
 export default router;
