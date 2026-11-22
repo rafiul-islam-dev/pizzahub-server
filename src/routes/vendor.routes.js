@@ -2,6 +2,7 @@ import express from "express";
 import { getDB } from "../config/db.js";
 import authenticate from "../middleware/auth.middleware.js";
 import authorizeRoles from "../middleware/role.middleware.js";
+import { ObjectId } from "mongodb";
 
 const router = express.Router();
 
@@ -247,8 +248,165 @@ router.get(
     }
   }
 );
+// GET: Get vendor orders
+router.get(
+  "/orders",
+  authenticate,
+  authorizeRoles("vendor"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+      const vendorId = req.user.id;
 
+      const { status } = req.query;
 
+      const allowedStatuses = [
+        "pending",
+        "confirmed",
+        "preparing",
+        "ready",
+        "delivered",
+        "rejected",
+        "cancelled",
+      ];
+
+      const query = { vendorId };
+
+      if (status && status !== "all") {
+        if (!allowedStatuses.includes(status)) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid order status",
+          });
+        }
+
+        query.status = status;
+      }
+
+      const orders = await db
+        .collection("orders")
+        .find(query)
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.status(200).json({
+        success: true,
+        data: orders,
+      });
+    } catch (error) {
+      console.error("Get vendor orders error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch vendor orders",
+      });
+    }
+  }
+);
+// PATCH: Accept or reject a pending order
+router.patch(
+  "/orders/:id/decision",
+  authenticate,
+  authorizeRoles("vendor"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const vendorId = req.user.id;
+      const { id } = req.params;
+      const { decision, rejectionReason } = req.body;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      if (!["accepted", "rejected"].includes(decision)) {
+        return res.status(400).json({
+          success: false,
+          message: "Decision must be accepted or rejected",
+        });
+      }
+
+      const orderId = new ObjectId(id);
+
+      // Check order ownership
+      const order = await db.collection("orders").findOne({
+        _id: orderId,
+        vendorId,
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      if (order.status !== "pending") {
+        return res.status(409).json({
+          success: false,
+          message: "This order has already been processed",
+        });
+      }
+
+      const newStatus =
+        decision === "accepted" ? "confirmed" : "rejected";
+
+      const updateData = {
+        status: newStatus,
+        updatedAt: new Date(),
+        vendorDecisionAt: new Date(),
+      };
+
+      if (decision === "rejected" && rejectionReason?.trim()) {
+        updateData.rejectionReason = rejectionReason.trim();
+      }
+
+      // Atomic update prevents repeated decisions
+      const result = await db.collection("orders").updateOne(
+        {
+          _id: orderId,
+          vendorId,
+          status: "pending",
+        },
+        {
+          $set: updateData,
+        }
+      );
+
+      if (result.modifiedCount === 0) {
+        return res.status(409).json({
+          success: false,
+          message: "Order has already been processed",
+        });
+      }
+
+      const updatedOrder = await db.collection("orders").findOne({
+        _id: orderId,
+        vendorId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message:
+          decision === "accepted"
+            ? "Order accepted successfully"
+            : "Order rejected successfully",
+        data: updatedOrder,
+      });
+    } catch (error) {
+      console.error("Vendor order decision error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to process order decision",
+      });
+    }
+  }
+);
 
 
 
