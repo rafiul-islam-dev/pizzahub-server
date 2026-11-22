@@ -9,6 +9,7 @@ import vendorRoutes from "./routes/vendor.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import vendorMenuRoutes from "./routes/vendor-menu.routes.js";
 import adminMenuRoutes from "./routes/admin-menu.routes.js";
+import orderRoutes from "./routes/orders.routes.js";
 
 dotenv.config();
 
@@ -43,7 +44,7 @@ app.use("/api/vendor", vendorRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/vendor/menu", vendorMenuRoutes);
 app.use("/api/admin/menu-items", adminMenuRoutes);
-
+app.use("/api/orders", orderRoutes);
 
 // 404 handler
 app.use((req, res) => {
