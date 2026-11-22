@@ -798,5 +798,141 @@ router.get(
     }
   }
 );
+// GET admin dashboard statistics
+router.get(
+  "/dashboard/stats",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const users = db.collection("user");
+      const menuItems = db.collection("menuItems");
+      const orders = db.collection("orders");
+      const transactions = db.collection("transactions");
+      const vendorApplications = db.collection("vendorApplications");
+
+      const [
+        totalUsers,
+        totalVendors,
+        totalMenuItems,
+        approvedMenuItems,
+        pendingMenuItems,
+        totalOrders,
+        pendingOrders,
+        completedOrders,
+        totalRevenue,
+        pendingVendorApplications,
+      ] = await Promise.all([
+        users.countDocuments(),
+
+        users.countDocuments({
+          role: "vendor",
+          vendorStatus: "approved",
+        }),
+
+        menuItems.countDocuments(),
+
+        menuItems.countDocuments({
+          isApproved: true,
+        }),
+
+        menuItems.countDocuments({
+          $or: [
+            { approvalStatus: "pending" },
+            {
+              isApproved: false,
+              approvalStatus: { $exists: false },
+            },
+          ],
+        }),
+
+        orders.countDocuments(),
+
+        orders.countDocuments({
+          status: "pending",
+        }),
+
+        orders.countDocuments({
+          status: "delivered",
+        }),
+
+        transactions.aggregate([
+          {
+            $match: {
+              status: "completed",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: "$amount",
+              },
+            },
+          },
+        ]).toArray(),
+
+        vendorApplications.countDocuments({
+          status: "pending",
+        }),
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          totalUsers,
+          totalVendors,
+          totalMenuItems,
+          approvedMenuItems,
+          pendingMenuItems,
+          totalOrders,
+          pendingOrders,
+          completedOrders,
+          totalRevenue: totalRevenue[0]?.total || 0,
+          pendingVendorApplications,
+        },
+      });
+    } catch (error) {
+      console.error("Admin dashboard stats error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch dashboard statistics",
+      });
+    }
+  }
+);
+// GET recent orders for admin dashboard
+router.get(
+  "/dashboard/recent-orders",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const recentOrders = await db
+        .collection("orders")
+        .find({})
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray();
+
+      res.json({
+        success: true,
+        data: recentOrders,
+      });
+    } catch (error) {
+      console.error("Recent orders error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch recent orders",
+      });
+    }
+  }
+);
 
 export default router;
