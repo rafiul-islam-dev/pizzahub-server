@@ -407,7 +407,97 @@ router.patch(
     }
   }
 );
+// PATCH: Update vendor order status
+router.patch(
+  "/orders/:id/status",
+  authenticate,
+  authorizeRoles("vendor"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+      const vendorId = req.user.id;
+      const { id } = req.params;
+      const { status } = req.body;
 
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      // Allowed transitions
+      const allowedTransitions = {
+        confirmed: ["preparing"],
+        preparing: ["ready"],
+        ready: ["delivered"],
+      };
+
+      const orderId = new ObjectId(id);
+
+      const order = await db.collection("orders").findOne({
+        _id: orderId,
+        vendorId,
+      });
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found",
+        });
+      }
+
+      const nextStatuses = allowedTransitions[order.status];
+
+      if (!nextStatuses || !nextStatuses.includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: `Cannot change order status from ${order.status} to ${status}`,
+        });
+      }
+
+      // Atomic update
+      const result = await db.collection("orders").updateOne(
+        {
+          _id: orderId,
+          vendorId,
+          status: order.status,
+        },
+        {
+          $set: {
+            status,
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      if (result.modifiedCount === 0) {
+        return res.status(409).json({
+          success: false,
+          message: "Order status changed. Please refresh.",
+        });
+      }
+
+      const updatedOrder = await db.collection("orders").findOne({
+        _id: orderId,
+        vendorId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: `Order updated to ${status}`,
+        data: updatedOrder,
+      });
+    } catch (error) {
+      console.error("Update vendor order status error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update order status",
+      });
+    }
+  }
+);
 
 
 export default router;
