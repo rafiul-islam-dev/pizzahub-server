@@ -558,4 +558,151 @@ router.get(
   }
 );
 
+// GET transaction summary
+router.get(
+  "/transactions/summary",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const transactions = db.collection("transactions");
+
+      const summary = await transactions
+        .aggregate([
+          {
+            $group: {
+              _id: null,
+              totalTransactions: { $sum: 1 },
+              totalRevenue: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$status", "completed"] },
+                    "$amount",
+                    0,
+                  ],
+                },
+              },
+              completedTransactions: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$status", "completed"] },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              pendingTransactions: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$status", "pending"] },
+                    1,
+                    0,
+                  ],
+                },
+              },
+              failedTransactions: {
+                $sum: {
+                  $cond: [
+                    { $eq: ["$status", "failed"] },
+                    1,
+                    0,
+                  ],
+                },
+              },
+            },
+          },
+        ])
+        .toArray();
+
+      res.json({
+        success: true,
+        data: summary[0] || {
+          totalTransactions: 0,
+          totalRevenue: 0,
+          completedTransactions: 0,
+          pendingTransactions: 0,
+          failedTransactions: 0,
+        },
+      });
+    } catch (error) {
+      console.error("Transaction summary error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch transaction summary",
+      });
+    }
+  }
+);
+// GET all transactions
+router.get(
+  "/transactions",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const {
+        page = 1,
+        limit = 10,
+        search = "",
+        status = "all",
+      } = req.query;
+
+      const currentPage = Math.max(1, Number(page) || 1);
+      const perPage = Math.min(50, Math.max(1, Number(limit) || 10));
+
+      const filter = {};
+
+      // Filter by payment status
+      if (status !== "all") {
+        filter.status = status;
+      }
+
+      // Search by transaction ID, user email, or Stripe session
+      if (search.trim()) {
+        filter.$or = [
+          { transactionId: { $regex: search, $options: "i" } },
+          { userEmail: { $regex: search, $options: "i" } },
+          { stripeSessionId: { $regex: search, $options: "i" } },
+        ];
+      }
+
+      const collection = db.collection("transactions");
+
+      const [transactions, total] = await Promise.all([
+        collection
+          .find(filter)
+          .sort({ createdAt: -1 })
+          .skip((currentPage - 1) * perPage)
+          .limit(perPage)
+          .toArray(),
+
+        collection.countDocuments(filter),
+      ]);
+
+      res.json({
+        success: true,
+        data: transactions,
+        pagination: {
+          page: currentPage,
+          limit: perPage,
+          total,
+          totalPages: Math.ceil(total / perPage),
+        },
+      });
+    } catch (error) {
+      console.error("Admin transactions error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch transactions",
+      });
+    }
+  }
+);
+
 export default router;
