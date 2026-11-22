@@ -157,5 +157,86 @@ router.post(
     }
   }
 );
+// GET: Get customer's orders
+router.get(
+  "/my",
+  authenticate,
+  authorizeRoles("customer"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const orders = await db
+        .collection("orders")
+        .find({ customerId: req.user.id })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      return res.json({
+        success: true,
+        data: orders,
+      });
+    } catch (error) {
+      console.error("Get customer orders error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch orders",
+      });
+    }
+  }
+);
+// PATCH: Cancel pending customer order
+router.patch(
+  "/:id/cancel",
+  authenticate,
+  authorizeRoles("customer"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
+      const result = await db.collection("orders").updateOne(
+        {
+          _id: new ObjectId(id),
+          customerId: req.user.id,
+          status: "pending",
+        },
+        {
+          $set: {
+            status: "cancelled",
+            updatedAt: new Date(),
+          },
+        }
+      );
+
+      if (!result.modifiedCount) {
+        return res.status(404).json({
+          success: false,
+          message: "Order not found or cannot be cancelled",
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Order cancelled successfully",
+      });
+    } catch (error) {
+      console.error("Cancel order error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to cancel order",
+      });
+    }
+  }
+);
 
 export default router;
