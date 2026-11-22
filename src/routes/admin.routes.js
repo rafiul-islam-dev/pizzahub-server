@@ -704,5 +704,99 @@ router.get(
     }
   }
 );
+// GET monthly sales analytics
+router.get(
+  "/analytics/monthly",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const sixMonthsAgo = new Date();
+      sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 5);
+        sixMonthsAgo.setDate(1);
+      sixMonthsAgo.setHours(0, 0, 0, 0);
+
+      const result = await db
+        .collection("transactions")
+        .aggregate([
+          {
+            $match: {
+              status: "completed",
+              createdAt: {
+                $gte: sixMonthsAgo,
+              },
+            },
+          },
+          {
+            $group: {
+              _id: {
+                year: {
+                  $year: "$createdAt",
+                },
+                month: {
+                  $month: "$createdAt",
+                },
+              },
+              revenue: {
+                $sum: "$amount",
+              },
+              transactions: {
+                $sum: 1,
+              },
+            },
+          },
+          {
+            $sort: {
+              "_id.year": 1,
+              "_id.month": 1,
+            },
+          },
+        ])
+        .toArray();
+
+      // Fill missing months with zero
+      const monthlyData = [];
+
+      for (let i = 5; i >= 0; i--) {
+        const date = new Date();
+        date.setDate(1);
+        date.setHours(0, 0, 0, 0);
+        date.setMonth(date.getMonth() - i);
+
+        const year = date.getFullYear();
+        const month = date.getMonth() + 1;
+
+        const existing = result.find(
+          (item) =>
+            item._id.year === year &&
+            item._id.month === month
+        );
+
+        monthlyData.push({
+          month: date.toLocaleString("en-US", {
+            month: "short",
+          }),
+          year,
+          revenue: existing?.revenue || 0,
+          transactions: existing?.transactions || 0,
+        });
+      }
+
+      res.json({
+        success: true,
+        data: monthlyData,
+      });
+    } catch (error) {
+      console.error("Monthly analytics error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch monthly analytics",
+      });
+    }
+  }
+);
 
 export default router;
