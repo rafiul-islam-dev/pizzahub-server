@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { getDB } from "../config/db.js";
 
 const JWKS = createRemoteJWKSet(
   new URL(process.env.AUTH_JWKS_URL)
@@ -29,8 +30,27 @@ const authenticate = async (req, res, next) => {
       });
     }
 
+    const user = await getDB()
+      .collection("user")
+      .findOne({ id: payload.sub });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "User account not found",
+      });
+    }
+
+    if (user.isActive === false) {
+      return res.status(403).json({
+        success: false,
+        message: "Your account has been suspended",
+      });
+    }
+
     req.user = {
       id: payload.sub,
+      email: payload.email,
     };
 
     next();
