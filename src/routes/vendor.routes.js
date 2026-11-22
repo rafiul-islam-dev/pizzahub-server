@@ -116,6 +116,141 @@ router.get(
     }
   }
 );
+// GET vendor dashboard statistics
+router.get(
+  "/dashboard/stats",
+  authenticate,
+  authorizeRoles("vendor"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const vendorId = req.user.id;
+
+      const menuItems = db.collection("menuItems");
+      const orders = db.collection("orders");
+
+      const [
+        totalMenuItems,
+        approvedMenuItems,
+        pendingMenuItems,
+        totalOrders,
+        pendingOrders,
+        completedOrders,
+        revenueResult,
+      ] = await Promise.all([
+        menuItems.countDocuments({
+          vendorId,
+        }),
+
+        menuItems.countDocuments({
+          vendorId,
+          isApproved: true,
+        }),
+
+        menuItems.countDocuments({
+          vendorId,
+          $or: [
+            { approvalStatus: "pending" },
+            {
+              isApproved: false,
+              approvalStatus: { $exists: false },
+            },
+          ],
+        }),
+
+        orders.countDocuments({
+          vendorId,
+        }),
+
+        orders.countDocuments({
+          vendorId,
+          status: "pending",
+        }),
+
+        orders.countDocuments({
+          vendorId,
+          status: "delivered",
+        }),
+
+        orders.aggregate([
+          {
+            $match: {
+              vendorId,
+              status: "delivered",
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              total: {
+                $sum: "$totalAmount",
+              },
+            },
+          },
+        ]).toArray(),
+      ]);
+
+      res.json({
+        success: true,
+        data: {
+          totalMenuItems,
+          approvedMenuItems,
+          pendingMenuItems,
+          totalOrders,
+          pendingOrders,
+          completedOrders,
+          revenue: revenueResult[0]?.total || 0,
+        },
+      });
+    } catch (error) {
+      console.error("Vendor dashboard stats error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch vendor dashboard statistics",
+      });
+    }
+  }
+);
+// GET recent vendor orders
+router.get(
+  "/dashboard/recent-orders",
+  authenticate,
+  authorizeRoles("vendor"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const vendorId = req.user.id;
+
+      const recentOrders = await db
+        .collection("orders")
+        .find({
+          vendorId,
+        })
+        .sort({ createdAt: -1 })
+        .limit(5)
+        .toArray();
+
+      res.json({
+        success: true,
+        data: recentOrders,
+      });
+    } catch (error) {
+      console.error("Vendor recent orders error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to fetch recent orders",
+      });
+    }
+  }
+);
+
+
+
+
 
 export default router;
 
