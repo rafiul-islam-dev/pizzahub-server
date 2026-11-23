@@ -1,11 +1,54 @@
-
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 
-const JWKS = createRemoteJWKSet(
-  new URL(process.env.AUTH_JWKS_URL)
-);
+// Vercel preview deployments each generate their own JWT signing keys and set
+// the token's `iss` to their own URL. A fixed JWKS URL therefore cannot verify
+// those tokens. Resolve the JWKS from the token's issuer instead, restricted
+// to trusted origins so this cannot be used for SSRF.
+const jwksCache = new Map();
+
+function isTrustedOrigin(value) {
+  if (!value) return false;
+
+  if (
+    process.env.CLIENT_URL &&
+    value === process.env.CLIENT_URL
+  ) {
+    return true;
+  }
+
+  if (process.env.AUTH_ISSUER && value === process.env.AUTH_ISSUER) {
+    return true;
+  }
+
+  if (value === "http://localhost:3000") return true;
+
+  try {
+    const url = new URL(value);
+
+    return (
+      url.protocol === "https:" &&
+      (url.hostname === "localhost" ||
+        url.hostname.endsWith(".vercel.app"))
+    );
+  } catch {
+    return false;
+  }
+}
+
+function jwksFor(issuer) {
+  if (!jwksCache.has(issuer)) {
+    jwksCache.set(
+      issuer,
+      createRemoteJWKSet(
+        new URL(`${issuer.replace(/\/$/, "")}/api/auth/jwks`)
+      )
+    );
+  }
+
+  return jwksCache.get(issuer);
+}
 
 const authenticate = async (req, res, next) => {
   try {
@@ -20,21 +63,33 @@ const authenticate = async (req, res, next) => {
 
     const token = authHeader.slice(7);
 
-    const verifyOptions = {};
+    // Read the (unverified) issuer only to locate the correct JWKS. The
+    // signature is verified below with that JWKS, so a forged issuer cannot
+    // be trusted without a valid signature from that same origin.
+    let issuer;
+    let audience;
 
-    if (process.env.AUTH_ISSUER) {
-      verifyOptions.issuer = process.env.AUTH_ISSUER;
+    try {
+      const payloadSegment = token.split(".")[1];
+      const decoded = JSON.parse(
+        Buffer.from(payloadSegment, "base64url").toString("utf8")
+      );
+      issuer = decoded.iss;
+      audience = decoded.aud;
+    } catch {
+      // handled by the trusted-origin checks below
     }
 
-    if (process.env.AUTH_AUDIENCE) {
-      verifyOptions.audience = process.env.AUTH_AUDIENCE;
+    if (!isTrustedOrigin(issuer) || !isTrustedOrigin(audience)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token",
+      });
     }
 
-    const { payload } = await jwtVerify(
-      token,
-      JWKS,
-      verifyOptions
-    );
+    // Verify signature, expiry and claims using the JWKS of the deployment
+    // that issued the token.
+    const { payload } = await jwtVerify(token, jwksFor(issuer));
 
     if (!payload.sub) {
       return res.status(401).json({
@@ -44,7 +99,6 @@ const authenticate = async (req, res, next) => {
     }
 
     const db = getDB();
-
     const userId = payload.sub;
 
     const possibleIds = [{ id: userId }, { _id: userId }];
