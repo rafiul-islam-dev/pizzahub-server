@@ -14,10 +14,7 @@ export default function authorizeRoles(...allowedRoles) {
       const db = getDB();
       const userId = req.user.id;
 
-      const possibleIds = [
-        { id: userId },
-        { _id: userId },
-      ];
+      const possibleIds = [{ id: userId }, { _id: userId }];
 
       if (ObjectId.isValid(userId)) {
         possibleIds.push({
@@ -36,10 +33,14 @@ export default function authorizeRoles(...allowedRoles) {
         });
       }
 
-      if (user.banned) {
+      if (
+        user.banned === true ||
+        user.isBlocked === true ||
+        user.isActive === false
+      ) {
         return res.status(403).json({
           success: false,
-          message: "Your account has been blocked",
+          message: "Your account has been suspended",
         });
       }
 
