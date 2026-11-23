@@ -2,52 +2,39 @@ import { createRemoteJWKSet, jwtVerify } from "jose";
 import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 
-// Vercel preview deployments each generate their own JWT signing keys and set
-// the token's `iss` to their own URL. A fixed JWKS URL therefore cannot verify
-// those tokens. Resolve the JWKS from the token's issuer instead, restricted
-// to trusted origins so this cannot be used for SSRF.
-const jwksCache = new Map();
+// All deployments share the same MongoDB, so Better Auth's JWKS keys are the
+// same everywhere. Use one stable JWKS URL (the production client) and verify
+// signature + expiry. Issuer/audience are checked loosely because Vercel
+// preview deployments sign with their own deployment URL.
+const configuredJwksUrl = process.env.AUTH_JWKS_URL;
+
+const JWKS_URL =
+  configuredJwksUrl && !configuredJwksUrl.includes("localhost")
+    ? configuredJwksUrl
+    : "https://pizzahub-client-chgd.vercel.app/api/auth/jwks";
+
+const JWKS = createRemoteJWKSet(new URL(JWKS_URL));
 
 function isTrustedOrigin(value) {
   if (!value) return false;
 
-  if (
-    process.env.CLIENT_URL &&
-    value === process.env.CLIENT_URL
-  ) {
-    return true;
-  }
-
-  if (process.env.AUTH_ISSUER && value === process.env.AUTH_ISSUER) {
-    return true;
-  }
-
   if (value === "http://localhost:3000") return true;
+
+  if (process.env.CLIENT_URL && value === process.env.CLIENT_URL) {
+    return true;
+  }
 
   try {
     const url = new URL(value);
 
     return (
-      url.protocol === "https:" &&
+      (url.protocol === "https:" || url.hostname === "localhost") &&
       (url.hostname === "localhost" ||
         url.hostname.endsWith(".vercel.app"))
     );
   } catch {
     return false;
   }
-}
-
-function jwksFor(issuer) {
-  if (!jwksCache.has(issuer)) {
-    jwksCache.set(
-      issuer,
-      createRemoteJWKSet(
-        new URL(`${issuer.replace(/\/$/, "")}/api/auth/jwks`)
-      )
-    );
-  }
-
-  return jwksCache.get(issuer);
 }
 
 const authenticate = async (req, res, next) => {
@@ -63,21 +50,17 @@ const authenticate = async (req, res, next) => {
 
     const token = authHeader.slice(7);
 
-    // Read the (unverified) issuer only to locate the correct JWKS. The
-    // signature is verified below with that JWKS, so a forged issuer cannot
-    // be trusted without a valid signature from that same origin.
     let issuer;
     let audience;
 
     try {
-      const payloadSegment = token.split(".")[1];
       const decoded = JSON.parse(
-        Buffer.from(payloadSegment, "base64url").toString("utf8")
+        Buffer.from(token.split(".")[1], "base64url").toString("utf8")
       );
       issuer = decoded.iss;
       audience = decoded.aud;
     } catch {
-      // handled by the trusted-origin checks below
+      // verified below
     }
 
     if (!isTrustedOrigin(issuer) || !isTrustedOrigin(audience)) {
@@ -87,9 +70,8 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    // Verify signature, expiry and claims using the JWKS of the deployment
-    // that issued the token.
-    const { payload } = await jwtVerify(token, jwksFor(issuer));
+    // Verify signature and expiry only. Keys come from the shared JWKS.
+    const { payload } = await jwtVerify(token, JWKS);
 
     if (!payload.sub) {
       return res.status(401).json({
