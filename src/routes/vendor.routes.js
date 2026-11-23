@@ -36,7 +36,7 @@ router.post(
         });
       }
 
-      // Check pending application
+      // Rejected applications may re-apply; pending ones block new requests.
       const existingApplication = await db
         .collection("vendorApplications")
         .findOne({
@@ -262,7 +262,9 @@ router.get(
       const { status } = req.query;
 
       const allowedStatuses = [
+        "all",
         "pending",
+        "accepted",
         "confirmed",
         "preparing",
         "ready",
@@ -354,7 +356,7 @@ router.patch(
       }
 
       const newStatus =
-        decision === "accepted" ? "confirmed" : "rejected";
+        decision === "accepted" ? "accepted" : "rejected";
 
       const updateData = {
         status: newStatus,
@@ -429,7 +431,7 @@ router.patch(
 
       // Allowed transitions
       const allowedTransitions = {
-        confirmed: ["preparing"],
+        accepted: ["preparing"],
         preparing: ["ready"],
         ready: ["delivered"],
       };
