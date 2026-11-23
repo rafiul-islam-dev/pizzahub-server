@@ -15,7 +15,13 @@ router.post(
     try {
       const db = getDB();
 
-      const { items, deliveryAddress, phone } = req.body;
+      const {
+        items,
+        deliveryAddress,
+        phone,
+        deliveryDate,
+        message,
+      } = req.body;
 
       if (!Array.isArray(items) || items.length === 0) {
         return res.status(400).json({
@@ -28,6 +34,26 @@ router.post(
         return res.status(400).json({
           success: false,
           message: "Delivery address and phone are required",
+        });
+      }
+
+      // Delivery date is required and must be today or later.
+      const requestedDate = deliveryDate ? new Date(deliveryDate) : null;
+
+      if (!requestedDate || Number.isNaN(requestedDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: "A valid delivery date is required",
+        });
+      }
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (requestedDate < today) {
+        return res.status(400).json({
+          success: false,
+          message: "Delivery date cannot be in the past",
         });
       }
 
@@ -89,6 +115,49 @@ router.post(
         });
       }
 
+      // A customer cannot order an item they own (vendors ordering their
+      // own menu item through their customer account).
+      const ownsAnyItem = menuItems.some(
+        (menuItem) => String(menuItem.vendorId) === String(req.user.id)
+      );
+
+      if (ownsAnyItem) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot order your own items",
+        });
+      }
+
+      // Prevent duplicate active orders for the same item and delivery date.
+      const orderedMenuItemIds = items.map((item) =>
+        String(item.menuItemId)
+      );
+      const deliveryDateOnly = new Date(requestedDate);
+      deliveryDateOnly.setHours(0, 0, 0, 0);
+
+      const nextDay = new Date(deliveryDateOnly);
+      nextDay.setDate(nextDay.getDate() + 1);
+
+      const duplicateOrder = await db.collection("orders").findOne({
+        customerId: req.user.id,
+        status: { $in: ["pending", "confirmed"] },
+        "items.menuItemId": {
+          $in: orderedMenuItemIds.map((id) => new ObjectId(id)),
+        },
+        deliveryDate: {
+          $gte: deliveryDateOnly,
+          $lt: nextDay,
+        },
+      });
+
+      if (duplicateOrder) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "You already have an active order for this item on the selected date",
+        });
+      }
+
       // Create order items using trusted database prices
       const orderItems = items.map((requestedItem) => {
         const menuItem = menuItems.find(
@@ -122,8 +191,10 @@ router.post(
 
         items: orderItems,
 
+        deliveryDate: requestedDate,
         deliveryAddress: deliveryAddress.trim(),
         phone: phone.trim(),
+        message: message?.trim() || "",
 
         totalAmount,
 
@@ -153,6 +224,57 @@ router.post(
       return res.status(500).json({
         success: false,
         message: "Failed to create order",
+      });
+    }
+  }
+);
+// GET: Customer order statistics
+router.get(
+  "/stats",
+  authenticate,
+  authorizeRoles("customer"),
+  async (req, res) => {
+    try {
+      const db = getDB();
+
+      const orders = await db
+        .collection("orders")
+        .find({ customerId: req.user.id })
+        .toArray();
+
+      const counts = {
+        total: orders.length,
+        pending: 0,
+        accepted: 0,
+        rejected: 0,
+        cancelled: 0,
+        delivered: 0,
+      };
+
+      orders.forEach((order) => {
+        const status = String(order.status || "").toLowerCase();
+
+        if (status === "pending") counts.pending += 1;
+        else if (
+          status === "accepted" ||
+          status === "confirmed"
+        )
+          counts.accepted += 1;
+        else if (status === "rejected") counts.rejected += 1;
+        else if (status === "cancelled") counts.cancelled += 1;
+        else if (status === "delivered") counts.delivered += 1;
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: counts,
+      });
+    } catch (error) {
+      console.error("Order stats error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch order statistics",
       });
     }
   }
