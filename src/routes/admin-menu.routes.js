@@ -27,6 +27,8 @@ router.get(
         filter = { isApproved: true };
       } else if (status === "rejected") {
         filter = { approvalStatus: "rejected" };
+      } else if (status === "all") {
+        filter = {};
       } else {
         return res.status(400).json({
           success: false,
@@ -94,16 +96,6 @@ router.patch(
         });
       }
 
-      if (
-        menuItem.isApproved === true ||
-        menuItem.approvalStatus === "rejected"
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "This menu item has already been reviewed",
-        });
-      }
-
       const updateData = {
         approvalStatus: status,
         reviewedAt: new Date(),
@@ -135,6 +127,112 @@ router.patch(
       return res.status(500).json({
         success: false,
         message: "Failed to review menu item",
+      });
+    }
+  }
+);
+
+// Delete a menu item
+router.delete(
+  "/:id",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid menu item ID",
+        });
+      }
+
+      const db = getDB();
+
+      const result = await db
+        .collection("menuItems")
+        .deleteOne({ _id: new ObjectId(id) });
+
+      if (result.deletedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Menu item not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Menu item deleted",
+      });
+    } catch (error) {
+      console.error("Delete menu item error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to delete menu item",
+      });
+    }
+  }
+);
+
+// Change the published status of a menu item
+router.patch(
+  "/:id/status",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { isAvailable } = req.body;
+
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid menu item ID",
+        });
+      }
+
+      if (typeof isAvailable !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          message: "isAvailable must be a boolean",
+        });
+      }
+
+      const db = getDB();
+
+      const result = await db
+        .collection("menuItems")
+        .updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              isAvailable,
+              updatedAt: new Date(),
+            },
+          }
+        );
+
+      if (result.matchedCount === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Menu item not found",
+        });
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: isAvailable
+          ? "Menu item activated"
+          : "Menu item deactivated",
+      });
+    } catch (error) {
+      console.error("Update menu item status error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update menu item status",
       });
     }
   }
