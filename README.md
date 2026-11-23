@@ -34,11 +34,11 @@ Server runs on http://localhost:5000
 See `.env.example`: `PORT`, `CLIENT_URL`, `MONGODB_URI`, `DB_NAME`, `AUTH_JWKS_URL`, `AUTH_ISSUER`, `AUTH_AUDIENCE`, `IMGBB_API_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_ID`, `STRIPE_PREMIUM_AMOUNT`.
 
 ## Repository Links
-- Client: <your-client-repo-url>
-- Server: <your-server-repo-url>
+- Client: https://github.com/rafiul-islam-dev/pizzahub-client
+- Server: https://github.com/rafiul-islam-dev/pizzahub-server
 
 ## Live API
-<your-live-server-url>
+https://pizzahub-server-rouge.vercel.app/api
 
 ## Advanced Search / Sorting (Challenge)
 `GET /api/menu` accepts `search`, `category`, `location` and `sort` (`price-low`, `price-high`, `name`) query parameters and returns enriched items (vendor name, premium flag) with premium vendors first.
