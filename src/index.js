@@ -9,7 +9,10 @@ import vendorRoutes from "./routes/vendor.routes.js";
 import adminRoutes from "./routes/admin.routes.js";
 import vendorMenuRoutes from "./routes/vendor-menu.routes.js";
 import adminMenuRoutes from "./routes/admin-menu.routes.js";
+import paymentsRoutes from "./routes/payments.routes.js";
 import orderRoutes from "./routes/orders.routes.js";
+import profileRoutes from "./routes/profile.routes.js";
+import uploadRoutes from "./routes/upload.routes.js";
 
 dotenv.config();
 
@@ -25,6 +28,11 @@ app.use(
     credentials: true,
   })
 );
+
+// Stripe webhook must receive the raw body, so it is mounted before the
+// global express.json() middleware. `payments.routes.js` itself attaches
+// express.raw() to the webhook route.
+app.use("/api/payments", paymentsRoutes);
 
 app.use(express.json());
 
@@ -45,6 +53,8 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/vendor/menu", vendorMenuRoutes);
 app.use("/api/admin/menu-items", adminMenuRoutes);
 app.use("/api/orders", orderRoutes);
+app.use("/api/profile", profileRoutes);
+app.use("/api/upload", uploadRoutes);
 
 // 404 handler
 app.use((req, res) => {
