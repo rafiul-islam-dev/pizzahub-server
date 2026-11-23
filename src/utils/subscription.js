@@ -1,3 +1,4 @@
+import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 
 // True only while the vendor's premium subscription is valid.
@@ -12,7 +13,7 @@ export async function hasActivePremium(vendorId) {
       {
         $or: [
           { id },
-          { _id: /^[a-f\d]{24}$/i.test(id) ? id : "__invalid__" },
+          ...(ObjectId.isValid(id) ? [{ _id: new ObjectId(id) }] : []),
         ],
       },
       { projection: { subscriptionPlan: 1, subscriptionExpiresAt: 1 } }

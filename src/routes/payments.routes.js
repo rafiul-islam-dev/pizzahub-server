@@ -1,5 +1,6 @@
 import express from "express";
 import { createHmac, timingSafeEqual } from "crypto";
+import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 import authenticate from "../middleware/auth.middleware.js";
 import authorizeRoles from "../middleware/role.middleware.js";
@@ -75,11 +76,9 @@ router.post(
         {
           $or: [
             { id: req.user.id },
-            {
-              _id: /^[a-f\d]{24}$/i.test(req.user.id)
-                ? req.user.id
-                : "__invalid__",
-            },
+            ...(ObjectId.isValid(req.user.id)
+              ? [{ _id: new ObjectId(req.user.id) }]
+              : []),
           ],
         },
         {
@@ -203,11 +202,9 @@ router.get(
         {
           $or: [
             { id: req.user.id },
-            {
-              _id: /^[a-f\d]{24}$/i.test(req.user.id)
-                ? req.user.id
-                : "__invalid__",
-            },
+            ...(ObjectId.isValid(req.user.id)
+              ? [{ _id: new ObjectId(req.user.id) }]
+              : []),
           ],
         },
         {
@@ -331,7 +328,8 @@ router.post(
           return res.json({ received: true });
         }
 
-        if (session.mode && session.mode !== "subscription") {
+        // Activate premium for both subscription and one-time payment checkouts.
+        if (session.mode && session.mode !== "subscription" && session.mode !== "payment") {
           return res.json({ received: true });
         }
 
@@ -344,7 +342,14 @@ router.post(
         expiresAt.setFullYear(expiresAt.getFullYear() + 1);
 
         await db.collection("user").updateOne(
-          { id: userId },
+          {
+            $or: [
+              { id: userId },
+              ...(ObjectId.isValid(userId)
+                ? [{ _id: new ObjectId(userId) }]
+                : []),
+            ],
+          },
           {
             $set: {
               subscriptionPlan: "premium",
@@ -371,7 +376,14 @@ router.post(
 
         if (userId) {
           await db.collection("user").updateOne(
-            { id: userId },
+            {
+              $or: [
+                { id: userId },
+                ...(ObjectId.isValid(userId)
+                  ? [{ _id: new ObjectId(userId) }]
+                  : []),
+              ],
+            },
             {
               $set: {
                 subscriptionPlan: "free",
@@ -391,7 +403,14 @@ router.post(
 
         if (userId) {
           await db.collection("user").updateOne(
-            { id: userId },
+            {
+              $or: [
+                { id: userId },
+                ...(ObjectId.isValid(userId)
+                  ? [{ _id: new ObjectId(userId) }]
+                  : []),
+              ],
+            },
             {
               $set: {
                 subscriptionPlan: "free",

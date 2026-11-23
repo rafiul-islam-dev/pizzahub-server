@@ -1,4 +1,5 @@
 import express from "express";
+import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 import authenticate from "../middleware/auth.middleware.js";
 
@@ -21,11 +22,9 @@ router.get("/me", authenticate, async (req, res) => {
       {
         $or: [
           { id: req.user.id },
-          {
-            _id: /^[a-f\d]{24}$/i.test(req.user.id)
-              ? req.user.id
-              : "__invalid__",
-          },
+          ...(ObjectId.isValid(req.user.id)
+            ? [{ _id: new ObjectId(req.user.id) }]
+            : []),
         ],
       },
       {
@@ -109,11 +108,9 @@ router.patch("/me", authenticate, async (req, res) => {
         {
           $or: [
             { id: req.user.id },
-            {
-              _id: /^[a-f\d]{24}$/i.test(req.user.id)
-                ? req.user.id
-                : "__invalid__",
-            },
+            ...(ObjectId.isValid(req.user.id)
+              ? [{ _id: new ObjectId(req.user.id) }]
+              : []),
           ],
         },
         { $set: updateFields }
@@ -123,11 +120,9 @@ router.patch("/me", authenticate, async (req, res) => {
       {
         $or: [
           { id: req.user.id },
-          {
-            _id: /^[a-f\d]{24}$/i.test(req.user.id)
-              ? req.user.id
-              : "__invalid__",
-          },
+          ...(ObjectId.isValid(req.user.id)
+            ? [{ _id: new ObjectId(req.user.id) }]
+            : []),
         ],
       },
       {
