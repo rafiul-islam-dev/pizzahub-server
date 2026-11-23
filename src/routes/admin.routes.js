@@ -156,7 +156,7 @@ router.patch(
         });
       }
 
-      // If approved, change user's role to vendor
+      // If approved, change user's role to vendor and copy business details
       if (status === "approved") {
         await db.collection("user").updateOne(
           { _id: applicantId },
@@ -164,6 +164,9 @@ router.patch(
             $set: {
               role: "vendor",
               vendorStatus: "approved",
+              businessName: application.businessName,
+              phone: application.phone,
+              address: application.address,
               updatedAt: new Date(),
             },
           }
@@ -244,7 +247,9 @@ router.get(
             role: 1,
             image: 1,
             isActive: 1,
+            isBlocked: 1,
             vendorStatus: 1,
+            subscriptionPlan: 1,
             createdAt: 1,
           })
           .sort({ createdAt: -1 })
@@ -321,25 +326,20 @@ router.patch(
         });
       }
 
-      // Vendor role must be earned through application approval.
-      if (
-        role === "vendor" &&
-        targetUser.vendorStatus !== "approved"
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "This user has not been approved as a vendor",
-        });
+      // If an admin promotes a user to vendor, mark them as approved so
+      // they can immediately publish menu items.
+      const updateFields = {
+        role,
+        updatedAt: new Date(),
+      };
+
+      if (role === "vendor") {
+        updateFields.vendorStatus = "approved";
       }
 
       await db.collection("user").updateOne(
         { _id: new ObjectId(id) },
-        {
-          $set: {
-            role,
-            updatedAt: new Date(),
-          },
-        }
+        { $set: updateFields }
       );
 
       return res.status(200).json({
@@ -406,6 +406,7 @@ router.patch(
         {
           $set: {
             isActive,
+            isBlocked: !isActive,
             updatedAt: new Date(),
           },
         }
@@ -755,9 +756,52 @@ router.get(
         collection.countDocuments(filter),
       ]);
 
+      // Enrich with vendor information.
+      const vendorIds = [
+        ...new Set(transactions.map((t) => t.vendorId).filter(Boolean)),
+      ];
+
+      const vendors = await db
+        .collection("user")
+        .find({
+          $or: [
+            { id: { $in: vendorIds } },
+            {
+              _id: {
+                $in: vendorIds.filter((id) =>
+                  /^[a-f\d]{24}$/i.test(id)
+                ),
+              },
+            },
+          ],
+        })
+        .toArray();
+
+      const vendorMap = new Map(
+        vendors.map((vendor) => [
+          String(vendor.id || vendor._id),
+          vendor,
+        ])
+      );
+
+      const enrichedTransactions = transactions.map((transaction) => {
+        const vendor = vendorMap.get(
+          String(transaction.vendorId)
+        );
+
+        return {
+          ...transaction,
+          vendorName:
+            vendor?.businessName ||
+            vendor?.name ||
+            "Unknown vendor",
+          vendorEmail: vendor?.email || transaction.userEmail || "",
+        };
+      });
+
       res.json({
         success: true,
-        data: transactions,
+        data: enrichedTransactions,
         pagination: {
           page: currentPage,
           limit: perPage,
