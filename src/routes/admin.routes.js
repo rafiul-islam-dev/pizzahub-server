@@ -4,8 +4,23 @@ import { ObjectId } from "mongodb";
 import { getDB } from "../config/db.js";
 import authenticate from "../middleware/auth.middleware.js";
 import authorizeRoles from "../middleware/role.middleware.js";
+import { recordOrderTransaction } from "../utils/recordTransaction.js";
 
 const router = express.Router();
+
+// better-auth stores the user's public `id` as the Mongo `_id` (ObjectId),
+// so any user reference must be converted before querying the `user` collection.
+function toObjectId(value) {
+  if (!value) return null;
+
+  if (value instanceof ObjectId) return value;
+
+  if (typeof value === "string" && ObjectId.isValid(value)) {
+    return new ObjectId(value);
+  }
+
+  return null;
+}
 
 // GET: Admin can view vendor applications
 router.get(
@@ -94,6 +109,28 @@ router.patch(
         });
       }
 
+      // Resolve and validate the applicant *before* mutating the application,
+      // otherwise a missing user leaves the application stuck as approved.
+      const applicantId = toObjectId(application.userId);
+
+      if (!applicantId) {
+        return res.status(400).json({
+          success: false,
+          message: "Application has an invalid user reference",
+        });
+      }
+
+      const applicant = await db
+        .collection("user")
+        .findOne({ _id: applicantId });
+
+      if (!applicant) {
+        return res.status(404).json({
+          success: false,
+          message: "User associated with this application was not found",
+        });
+      }
+
       // Update the application
       const updateResult = await db
         .collection("vendorApplications")
@@ -121,8 +158,8 @@ router.patch(
 
       // If approved, change user's role to vendor
       if (status === "approved") {
-        const userUpdate = await db.collection("user").updateOne(
-          { id: application.userId },
+        await db.collection("user").updateOne(
+          { _id: applicantId },
           {
             $set: {
               role: "vendor",
@@ -131,17 +168,10 @@ router.patch(
             },
           }
         );
-
-        if (userUpdate.matchedCount === 0) {
-          return res.status(404).json({
-            success: false,
-            message: "User associated with this application was not found",
-          });
-        }
       } else {
         // Rejected applications remain customers
         await db.collection("user").updateOne(
-          { id: application.userId },
+          { _id: applicantId },
           {
             $set: {
               vendorStatus: "rejected",
@@ -205,21 +235,26 @@ router.get(
 
       const total = await usersCollection.countDocuments(filter);
 
-      const users = await usersCollection
-        .find(filter)
-        .project({
-          name: 1,
-          email: 1,
-          role: 1,
-          image: 1,
-          isActive: 1,
-          vendorStatus: 1,
-          createdAt: 1,
-        })
-        .sort({ createdAt: -1 })
-        .skip((page - 1) * limit)
-        .limit(limit)
-        .toArray();
+      const users = (
+        await usersCollection
+          .find(filter)
+          .project({
+            name: 1,
+            email: 1,
+            role: 1,
+            image: 1,
+            isActive: 1,
+            vendorStatus: 1,
+            createdAt: 1,
+          })
+          .sort({ createdAt: -1 })
+          .skip((page - 1) * limit)
+          .limit(limit)
+          .toArray()
+      ).map((user) => ({
+        ...user,
+        id: user._id.toString(),
+      }));
 
       return res.status(200).json({
         success: true,
@@ -252,6 +287,13 @@ router.patch(
       const { id } = req.params;
       const { role } = req.body;
 
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user ID",
+        });
+      }
+
       if (!["customer", "vendor", "admin"].includes(role)) {
         return res.status(400).json({
           success: false,
@@ -268,7 +310,9 @@ router.patch(
 
       const db = getDB();
 
-      const targetUser = await db.collection("user").findOne({ id });
+      const targetUser = await db
+        .collection("user")
+        .findOne({ _id: new ObjectId(id) });
 
       if (!targetUser) {
         return res.status(404).json({
@@ -289,7 +333,7 @@ router.patch(
       }
 
       await db.collection("user").updateOne(
-        { id },
+        { _id: new ObjectId(id) },
         {
           $set: {
             role,
@@ -323,6 +367,13 @@ router.patch(
       const { id } = req.params;
       const { isActive } = req.body;
 
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid user ID",
+        });
+      }
+
       if (typeof isActive !== "boolean") {
         return res.status(400).json({
           success: false,
@@ -339,7 +390,9 @@ router.patch(
 
       const db = getDB();
 
-      const targetUser = await db.collection("user").findOne({ id });
+      const targetUser = await db
+        .collection("user")
+        .findOne({ _id: new ObjectId(id) });
 
       if (!targetUser) {
         return res.status(404).json({
@@ -349,7 +402,7 @@ router.patch(
       }
 
       await db.collection("user").updateOne(
-        { id },
+        { _id: new ObjectId(id) },
         {
           $set: {
             isActive,
@@ -459,6 +512,13 @@ router.patch(
       const { id } = req.params;
       const { status } = req.body;
 
+      if (!ObjectId.isValid(id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid order ID",
+        });
+      }
+
       const allowedStatuses = [
         "pending",
         "confirmed",
@@ -489,16 +549,27 @@ router.patch(
         });
       }
 
+      const updateFields = {
+        status,
+        updatedAt: new Date(),
+        adminUpdatedBy: req.user.id,
+      };
+
+      if (status === "delivered") {
+        updateFields.deliveredAt = new Date();
+        updateFields.paymentStatus = "paid";
+      }
+
       await db.collection("orders").updateOne(
         { _id: new ObjectId(id) },
         {
-          $set: {
-            status,
-            updatedAt: new Date(),
-            adminUpdatedBy: req.user.id,
-          },
+          $set: updateFields,
         }
       );
+
+      if (status === "delivered") {
+        await recordOrderTransaction(db, { ...order, ...updateFields });
+      }
 
       return res.status(200).json({
         success: true,

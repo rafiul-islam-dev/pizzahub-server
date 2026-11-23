@@ -3,6 +3,7 @@ import { getDB } from "../config/db.js";
 import authenticate from "../middleware/auth.middleware.js";
 import authorizeRoles from "../middleware/role.middleware.js";
 import { ObjectId } from "mongodb";
+import { recordOrderTransaction } from "../utils/recordTransaction.js";
 
 const router = express.Router();
 
@@ -456,6 +457,16 @@ router.patch(
         });
       }
 
+      const updateFields = {
+        status,
+        updatedAt: new Date(),
+      };
+
+      if (status === "delivered") {
+        updateFields.deliveredAt = new Date();
+        updateFields.paymentStatus = "paid";
+      }
+
       // Atomic update
       const result = await db.collection("orders").updateOne(
         {
@@ -464,10 +475,7 @@ router.patch(
           status: order.status,
         },
         {
-          $set: {
-            status,
-            updatedAt: new Date(),
-          },
+          $set: updateFields,
         }
       );
 
@@ -476,6 +484,10 @@ router.patch(
           success: false,
           message: "Order status changed. Please refresh.",
         });
+      }
+
+      if (status === "delivered") {
+        await recordOrderTransaction(db, { ...order, ...updateFields });
       }
 
       const updatedOrder = await db.collection("orders").findOne({

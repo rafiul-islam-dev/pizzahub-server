@@ -43,14 +43,16 @@ export default function authorizeRoles(...allowedRoles) {
         });
       }
 
-      if (!allowedRoles.includes(user.role)) {
+      const role = user.role || "customer";
+
+      if (!allowedRoles.includes(role)) {
         return res.status(403).json({
           success: false,
           message: "You do not have permission",
         });
       }
 
-      req.user.role = user.role;
+      req.user.role = role;
       req.user.email = user.email;
       req.user.name = user.name;
 
