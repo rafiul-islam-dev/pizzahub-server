@@ -66,7 +66,11 @@ const authenticate = async (req, res, next) => {
       });
     }
 
-    if (user.isActive === false) {
+    if (
+      user.isActive === false ||
+      user.banned === true ||
+      user.isBlocked === true
+    ) {
       return res.status(403).json({
         success: false,
         message: "Your account has been suspended",
